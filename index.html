@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Engine | Kadian Technologies</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-slate-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const CURRENCIES = { "USD": "$", "CAD": "$", "EUR": "€", "GBP": "£" };
+        const TAX_RATES = {
+            "Canada": { "AB": 0.05, "BC": 0.12, "MB": 0.12, "NB": 0.15, "NL": 0.15, "NS": 0.15, "ON": 0.13, "PE": 0.15, "QC": 0.14975, "SK": 0.11, "NT": 0.05, "NU": 0.05, "YT": 0.05 },
+            "USA": { "AL": 0.04, "AK": 0, "AZ": 0.056, "CA": 0.0725, "FL": 0.06, "GA": 0.04, "IL": 0.0625, "MA": 0.0625, "NY": 0.04, "TX": 0.0625, "WA": 0.065 }
+        };
+
+        const App = () => {
+            const [items, setItems] = useState([{ desc: '', qty: 1, price: 0 }]);
+            const [currency, setCurrency] = useState("USD");
+            const [profile, setProfile] = useState(() => JSON.parse(localStorage.getItem('biz_profile')) || { name: '', address: '', logo: '' });
+            const [isManualTax, setIsManualTax] = useState(false);
+            const [country, setCountry] = useState("Canada");
+            const [region, setRegion] = useState("ON");
+            const [manualRate, setManualRate] = useState(0);
+            const [totals, setTotals] = useState({ sub: 0, tax: 0, grand: 0 });
+            const invoiceRef = useRef();
+
+            useEffect(() => { localStorage.setItem('biz_profile', JSON.stringify(profile)); }, [profile]);
+
+            useEffect(() => {
+                const rate = isManualTax ? (manualRate / 100) : (TAX_RATES[country][region] || 0);
+                const sub = items.reduce((acc, item) => acc + (item.qty * item.price), 0);
+                const tax = sub * rate;
+                setTotals({ sub, tax, grand: sub + tax, currentRate: rate });
+            }, [items, isManualTax, country, region, manualRate]);
+
+            const handleLogo = (e) => {
+                const reader = new FileReader();
+                reader.onload = () => setProfile({...profile, logo: reader.result});
+                if(e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
+            };
+
+            const downloadPDF = async () => {
+                const canvas = await html2canvas(invoiceRef.current, { scale: 2 });
+                const pdf = new jspdf.jsPDF('p', 'px', 'a4');
+                pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 446, (canvas.height * 446) / canvas.width);
+                pdf.save(`Invoice_${profile.name || 'Business'}.pdf`);
+            };
+
+            return (
+                <div className="flex flex-col lg:flex-row h-screen">
+                    {/* SIDEBAR */}
+                    <div className="lg:w-1/3 p-6 bg-white border-r overflow-y-auto no-print flex flex-col shadow-inner">
+                        <div className="flex-grow">
+                            <h2 className="text-xl font-black mb-6 flex items-center gap-2"><span className="bg-blue-600 text-white p-1 rounded">⚙️</span> Control Center</h2>
+                            
+                            {/* BUSINESS PROFILE */}
+                            <div className="p-4 bg-blue-50 rounded-xl mb-6 border border-blue-100">
+                                <p className="text-[10px] font-bold text-blue-400 uppercase mb-3 tracking-widest">Business Profile</p>
+                                <input className="w-full p-2 border rounded mb-2 text-sm" placeholder="Company Name" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} />
+                                <textarea className="w-full p-2 border rounded mb-2 text-sm h-20" placeholder="Business Address & Contact" value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} />
+                                <label className="block text-[10px] font-bold text-gray-400 mb-1">Logo</label>
+                                <input type="file" onChange={handleLogo} className="text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:bg-blue-600 file:text-white mb-2" />
+                            </div>
+
+                            {/* CURRENCY & TAX */}
+                            <div className="grid grid-cols-2 gap-4 mb-6">
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase">Currency</label>
+                                    <select className="w-full p-2 border rounded text-sm" value={currency} onChange={e => setCurrency(e.target.value)}>
+                                        {Object.keys(CURRENCIES).map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase">Tax Mode</label>
+                                    <select className="w-full p-2 border rounded text-sm" onChange={e => setIsManualTax(e.target.value === "manual")}>
+                                        <option value="auto">Auto Lookup</option>
+                                        <option value="manual">Manual %</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* ITEMS */}
+                            <div className="space-y-2 mb-8">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase">Billing Items</p>
+                                {items.map((item, i) => (
+                                    <div key={i} className="flex gap-2">
+                                        <input className="flex-1 p-2 border rounded text-xs" placeholder="Service" value={item.desc} onChange={e => {const n=[...items]; n[i].desc=e.target.value; setItems(n);}} />
+                                        <input className="w-20 p-2 border rounded text-xs font-bold" type="number" placeholder="$" onChange={e => {const n=[...items]; n[i].price=parseFloat(e.target.value)||0; setItems(n);}} />
+                                    </div>
+                                ))}
+                                <button onClick={() => setItems([...items, {desc:'', qty:1, price:0}])} className="w-full py-2 bg-slate-800 text-white text-[10px] font-bold rounded hover:bg-black transition-colors uppercase">+ Add Line</button>
+                            </div>
+
+                            <button onClick={downloadPDF} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black shadow-lg hover:bg-blue-700 transition-all uppercase tracking-widest text-sm mb-4">Export PDF</button>
+                        </div>
+
+                        {/* SIDEBAR BRANDING */}
+                        <div className="pt-6 border-t border-gray-100 text-center">
+                            <p className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.2em]">Engineered By</p>
+                            <p className="text-sm font-black text-gray-800 tracking-tighter">KADIAN TECHNOLOGIES</p>
+                        </div>
+                    </div>
+
+                    {/* PREVIEW */}
+                    <div className="lg:w-2/3 p-12 overflow-y-auto flex justify-center items-start bg-slate-200">
+                        <div ref={invoiceRef} className="bg-white p-20 w-[794px] min-h-[1123px] shadow-2xl flex flex-col relative">
+                            {/* Header Section */}
+                            <div className="flex justify-between items-start mb-20 border-b-8 border-black pb-10">
+                                <div>
+                                    {profile.logo ? <img src={profile.logo} className="h-20 mb-4 object-contain" /> : <div className="h-16 w-16 bg-gray-100 rounded mb-4 border flex items-center justify-center text-[10px] text-gray-400">LOGO</div>}
+                                    <h1 className="text-6xl font-black tracking-tighter italic leading-none">INVOICE</h1>
+                                </div>
+                                <div className="text-right max-w-[250px]">
+                                    <p className="font-black text-xl uppercase leading-none mb-2">{profile.name || "COMPANY NAME"}</p>
+                                    <p className="text-xs text-gray-400 font-medium whitespace-pre-line leading-relaxed italic">{profile.address || "Add address in settings..."}</p>
+                                </div>
+                            </div>
+
+                            {/* Table */}
+                            <table className="w-full text-left mb-auto">
+                                <thead>
+                                    <tr className="border-b-4 border-black text-[10px] font-black uppercase tracking-widest text-gray-400">
+                                        <th className="py-4">Detailed Description</th>
+                                        <th className="py-4 text-right">Value ({currency})</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {items.map((item, i) => (
+                                        <tr key={i} className="border-b border-gray-50">
+                                            <td className="py-6 font-bold text-sm uppercase tracking-tight">{item.desc || 'NEW SERVICE RECORD'}</td>
+                                            <td className="py-6 text-right font-black italic">{CURRENCIES[currency]}{item.price.toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+
+                            {/* Footer Totals */}
+                            <div className="mt-12 w-80 ml-auto space-y-3 bg-black text-white p-10 rounded-3xl relative overflow-hidden shadow-2xl">
+                                <div className="flex justify-between text-[10px] font-black text-gray-500 tracking-[0.2em]"><span>SUBTOTAL</span><span>{CURRENCIES[currency]}{totals.sub.toFixed(2)}</span></div>
+                                <div className="flex justify-between text-[10px] font-black text-blue-400 tracking-[0.2em]"><span>TAX ({(totals.currentRate * 100).toFixed(2)}%)</span><span>{CURRENCIES[currency]}{totals.tax.toFixed(2)}</span></div>
+                                <div className="flex justify-between text-5xl font-black border-t border-gray-800 pt-6 italic tracking-tighter">
+                                    <span className="text-xs pt-4 not-italic font-normal opacity-50">{currency}</span>
+                                    <span>{CURRENCIES[currency]}{totals.grand.toFixed(2)}</span>
+                                </div>
+                            </div>
+
+                            {/* INVOICE BRANDING */}
+                            <div className="mt-20 pt-10 border-t border-gray-50 flex justify-between items-end opacity-30 grayscale hover:opacity-100 transition-opacity">
+                                <div>
+                                    <p className="text-[8px] font-bold uppercase tracking-widest">Document Integrity Guaranteed</p>
+                                    <p className="text-[10px] font-black italic">v4.2 | PRO GEN</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[8px] font-bold uppercase tracking-widest leading-none mb-1">Infrastructure Provided By</p>
+                                    <p className="text-sm font-black tracking-tighter leading-none">KADIAN TECHNOLOGIES</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
