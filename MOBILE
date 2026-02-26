@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Invoice Engine | Mobile Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap'); 
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; border-radius: 6px; }
+        
+        /* Ensures the A4 stays proportional while scaling for mobile views */
+        .invoice-container { transform-origin: top center; }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const CURRENCIES = { "USD": "$", "CAD": "$", "EUR": "€", "GBP": "£" };
+        const TAX_RATES = {
+            "Canada": { "AB": 0.05, "BC": 0.12, "ON": 0.13, "QC": 0.14975 },
+            "USA": { "NY": 0.04, "CA": 0.0725, "TX": 0.0625, "FL": 0.06 }
+        };
+
+        const App = () => {
+            const [items, setItems] = useState([{ desc: '', qty: 1, price: 0 }]);
+            const [profile, setProfile] = useState(() => JSON.parse(localStorage.getItem('biz_profile')) || { name: '', address: '', logo: '', themeColor: '#2563eb', notes: 'Thank you for your business!' });
+            const [invoiceDetails, setInvoiceDetails] = useState({ num: 'INV-1001', date: new Date().toISOString().split('T')[0] });
+            const [taxSetup, setTaxSetup] = useState({ isManual: false, country: 'Canada', region: 'ON', manualRate: 0 });
+            const [currency, setCurrency] = useState('USD');
+            const [isEditorOpen, setIsEditorOpen] = useState(true);
+            const [totals, setTotals] = useState({ sub: 0, tax: 0, grand: 0, rate: 0 });
+            
+            const invoiceRef = useRef();
+
+            useEffect(() => {
+                const rate = taxSetup.isManual ? (taxSetup.manualRate / 100) : (TAX_RATES[taxSetup.country]?.[taxSetup.region] || 0);
+                const sub = items.reduce((acc, item) => acc + (item.qty * item.price), 0);
+                const taxTotal = sub * rate;
+                setTotals({ sub, tax: taxTotal, grand: sub + taxTotal, rate });
+                localStorage.setItem('biz_profile', JSON.stringify(profile));
+            }, [items, taxSetup, profile]);
+
+            const downloadPDF = async () => {
+                const element = invoiceRef.current;
+                const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
+                const imgData = canvas.toDataURL('image/png');
+                const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+                const width = pdf.internal.pageSize.getWidth();
+                const height = (canvas.height * width) / canvas.width;
+                pdf.addImage(imgData, 'PNG', 0, 0, width, height);
+                pdf.save(`${invoiceDetails.num}.pdf`);
+            };
+
+            return (
+                <div className="flex flex-col h-screen overflow-hidden">
+                    {/* MOBILE HEADER */}
+                    <div className="bg-white border-b p-4 flex justify-between items-center z-50 shadow-sm">
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-xs" style={{backgroundColor: profile.themeColor}}>K</div>
+                            <span className="font-black tracking-tighter text-slate-800">INVOICE ENGINE</span>
+                        </div>
+                        <button 
+                            onClick={() => setIsEditorOpen(!isEditorOpen)}
+                            className="bg-slate-100 px-4 py-2 rounded-full text-xs font-bold text-slate-600 border border-slate-200"
+                        >
+                            {isEditorOpen ? '👁️ View' : '✍️ Edit'}
+                        </button>
+                    </div>
+
+                    <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+                        {/* SIDEBAR / EDITOR */}
+                        <div className={`${isEditorOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} absolute lg:relative z-40 w-full lg:w-[400px] h-full bg-white border-r overflow-y-auto transition-transform duration-300 ease-in-out p-5 no-scrollbar`}>
+                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Business & Brand</h3>
+                            <div className="space-y-3 mb-8">
+                                <input className="w-full p-3 bg-slate-50 border rounded-xl text-sm outline-none focus:border-blue-500" placeholder="Business Name" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} />
+                                <textarea className="w-full p-3 bg-slate-50 border rounded-xl text-sm h-20 outline-none focus:border-blue-500 resize-none" placeholder="Address, Contact, Tax ID" value={profile.address} onChange={e => setProfile({...profile, address: e.target.value})} />
+                                <div className="flex items-center gap-4 p-3 bg-slate-50 border rounded-xl">
+                                    <div className="flex-1">
+                                        <label className="text-[10px] font-bold text-slate-400 block mb-1">THEME COLOR</label>
+                                        <input type="color" className="w-full h-8" value={profile.themeColor} onChange={e => setProfile({...profile, themeColor: e.target.value})} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="text-[10px] font-bold text-slate-400 block mb-1">LOGO</label>
+                                        <input type="file" className="text-[10px] w-full" onChange={e => {
+                                            const reader = new FileReader();
+                                            reader.onload = () => setProfile({...profile, logo: reader.result});
+                                            if(e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
+                                        }} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Line Items</h3>
+                            <div className="space-y-3 mb-6">
+                                {items.map((item, i) => (
+                                    <div key={i} className="p-3 bg-slate-50 border rounded-xl flex flex-wrap gap-2 relative">
+                                        <input className="w-full p-2 bg-white border rounded text-xs" placeholder="Description" value={item.desc} onChange={e => {
+                                            const n = [...items]; n[i].desc = e.target.value; setItems(n);
+                                        }} />
+                                        <input className="flex-1 p-2 bg-white border rounded text-xs font-bold" type="number" placeholder="Qty" value={item.qty} onChange={e => {
+                                            const n = [...items]; n[i].qty = parseFloat(e.target.value) || 0; setItems(n);
+                                        }} />
+                                        <input className="flex-1 p-2 bg-white border rounded text-xs font-bold" type="number" placeholder="Price" value={item.price} onChange={e => {
+                                            const n = [...items]; n[i].price = parseFloat(e.target.value) || 0; setItems(n);
+                                        }} />
+                                        <button onClick={() => setItems(items.filter((_, idx) => idx !== i))} className="text-red-400 text-xs font-bold px-2">Remove</button>
+                                    </div>
+                                ))}
+                                <button onClick={() => setItems([...items, {desc: '', qty: 1, price: 0}])} className="w-full py-3 border-2 border-dashed border-slate-200 text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-50">+ Add Item</button>
+                            </div>
+
+                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Notes & Terms</h3>
+                            <textarea className="w-full p-3 bg-slate-50 border rounded-xl text-sm h-24 outline-none mb-6 resize-none" placeholder="Payment terms, notes..." value={profile.notes} onChange={e => setProfile({...profile, notes: e.target.value})} />
+
+                            <button onClick={downloadPDF} className="w-full py-4 rounded-2xl text-white font-black text-sm shadow-lg mb-20 transition-transform active:scale-95" style={{backgroundColor: profile.themeColor}}>EXPORT PDF</button>
+                        </div>
+
+                        {/* PREVIEW AREA */}
+                        <div className="flex-1 bg-slate-200 overflow-auto p-4 flex justify-center items-start lg:items-center no-scrollbar">
+                            <div className="invoice-container scale-[0.45] md:scale-[0.7] lg:scale-[0.85] origin-top md:origin-center shrink-0">
+                                <div ref={invoiceRef} className="bg-white w-[794px] min-h-[1123px] shadow-2xl p-16 flex flex-col relative text-slate-900">
+                                    <div className="flex justify-between items-start mb-16">
+                                        <div>
+                                            {profile.logo ? <img src={profile.logo} className="h-16 mb-4 object-contain" /> : <div className="h-16 w-16 bg-slate-100 rounded mb-4" />}
+                                            <h1 className="text-6xl font-black italic tracking-tighter" style={{color: profile.themeColor}}>INVOICE</h1>
+                                        </div>
+                                        <div className="text-right">
+                                            <h2 className="font-black text-xl mb-1 uppercase tracking-tight">{profile.name || 'YOUR BUSINESS'}</h2>
+                                            <p className="text-xs text-slate-400 whitespace-pre-line leading-relaxed">{profile.address || 'Address line 1\nCity, Country'}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-10 mb-16 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                        <div>
+                                            <p className="mb-1">Invoice Number</p>
+                                            <p className="text-slate-900 text-sm"># {invoiceDetails.num}</p>
+                                        </div>
+                                        <div>
+                                            <p className="mb-1">Date of Issue</p>
+                                            <p className="text-slate-900 text-sm">{invoiceDetails.date}</p>
+                                        </div>
+                                    </div>
+
+                                    <table className="w-full mb-auto">
+                                        <thead>
+                                            <tr className="border-b-4 border-slate-900 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                <th className="py-4 text-left">Description</th>
+                                                <th className="py-4 text-center">Qty</th>
+                                                <th className="py-4 text-right">Price</th>
+                                                <th className="py-4 text-right">Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {items.map((item, i) => (
+                                                <tr key={i} className="border-b border-slate-100">
+                                                    <td className="py-6 font-bold text-sm uppercase">{item.desc || 'New Item'}</td>
+                                                    <td className="py-6 text-center text-sm font-medium">{item.qty}</td>
+                                                    <td className="py-6 text-right text-sm font-medium">{CURRENCIES[currency]}{item.price.toFixed(2)}</td>
+                                                    <td className="py-6 text-right font-black italic">{CURRENCIES[currency]}{(item.qty * item.price).toFixed(2)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+
+                                    <div className="flex justify-between items-end mt-12 pt-8 border-t border-slate-100">
+                                        <div className="max-w-[400px]">
+                                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Terms & Notes</h4>
+                                            <p className="text-xs text-slate-500 italic leading-relaxed">{profile.notes}</p>
+                                        </div>
+                                        <div className="w-[300px] p-8 rounded-3xl text-white shadow-xl" style={{backgroundColor: profile.themeColor}}>
+                                            <div className="flex justify-between text-[10px] font-bold opacity-60 mb-2"><span>SUBTOTAL</span><span>{CURRENCIES[currency]}{totals.sub.toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-[10px] font-bold opacity-60 mb-6"><span>TAX ({(totals.rate * 100).toFixed(1)}%)</span><span>{CURRENCIES[currency]}{totals.tax.toFixed(2)}</span></div>
+                                            <div className="flex justify-between items-end border-t border-white/20 pt-4">
+                                                <span className="text-xs font-medium">TOTAL</span>
+                                                <span className="text-4xl font-black italic tracking-tighter">{CURRENCIES[currency]}{totals.grand.toFixed(2)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="mt-20 pt-8 border-t border-slate-50 flex justify-between items-center opacity-30">
+                                        <span className="text-[8px] font-bold tracking-[0.3em] uppercase">Engineered by Kadian Technologies</span>
+                                        <span className="text-[10px] font-black italic">PRO SERIES V4.5</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
